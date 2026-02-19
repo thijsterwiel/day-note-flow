@@ -93,6 +93,36 @@ export type Database = {
           },
         ]
       }
+      api_tokens: {
+        Row: {
+          created_at: string
+          id: string
+          last_used_at: string | null
+          name: string
+          revoked_at: string | null
+          token_hash: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          name: string
+          revoked_at?: string | null
+          token_hash: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          revoked_at?: string | null
+          token_hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       important_facts: {
         Row: {
           created_at: string
@@ -121,6 +151,30 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      ingest_events: {
+        Row: {
+          created_at: string
+          id: string
+          payload_json: Json | null
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          payload_json?: Json | null
+          type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          payload_json?: Json | null
+          type?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       reminders: {
         Row: {
