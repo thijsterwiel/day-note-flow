@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Download, Trash2, LogOut, Plus, Key, Copy, Check, XCircle, Smartphone, Loader2 } from 'lucide-react';
+import { Download, Trash2, LogOut, Plus, Key, Copy, Check, XCircle, Smartphone, Loader2, Eye, EyeOff, QrCode } from 'lucide-react';
+import { renderSVG } from 'uqr';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +11,13 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,9 +48,13 @@ export default function Settings() {
   const queryClient = useQueryClient();
   const [tokenName, setTokenName] = useState('');
   const [newToken, setNewToken] = useState<string | null>(null);
+  const [tokenModalOpen, setTokenModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [tokenRevealed, setTokenRevealed] = useState(false);
   const [revokeId, setRevokeId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+
+
 
   const { data: tokens = [], isLoading: tokensLoading } = useQuery({
     queryKey: ['api-tokens'],
@@ -84,9 +96,11 @@ export default function Settings() {
     },
     onSuccess: (data) => {
       setNewToken(data.token);
+      setTokenModalOpen(true);
+      setTokenRevealed(false);
+      setCopied(false);
       setTokenName('');
       queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
-      toast({ title: 'Token created', description: 'Copy it now - it will not be shown again.' });
     },
     onError: (err: Error) => {
       toast({ title: 'Error', description: err.message, variant: 'destructive' });
@@ -119,6 +133,20 @@ export default function Settings() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const handleCloseTokenModal = () => {
+    setTokenModalOpen(false);
+    setNewToken(null);
+    setTokenRevealed(false);
+    setCopied(false);
+  };
+
+  const maskedToken = newToken
+    ? newToken.slice(0, 8) + '•'.repeat(Math.max(0, newToken.length - 12)) + newToken.slice(-4)
+    : '';
+
+  const qrValue = newToken ? `daynote://token?value=${newToken}` : '';
+  const fallbackText = newToken ? `DAYNOTE_TOKEN:${newToken}` : '';
 
   const handleExport = () => {
     toast({ title: 'Export started', description: 'Your data will download shortly.' });
@@ -178,25 +206,7 @@ curl -X POST \\
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* New token banner */}
-            {newToken && (
-              <div className="bg-accent/50 border border-accent rounded-lg p-3 space-y-2">
-                <p className="text-sm font-medium text-foreground">
-                  ⚠️ Copy this token now — it won't be shown again!
-                </p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-background rounded px-2 py-1.5 font-mono break-all border">
-                    {newToken}
-                  </code>
-                  <Button size="sm" variant="outline" onClick={copyToken}>
-                    {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  </Button>
-                </div>
-                <Button size="sm" variant="ghost" className="text-xs" onClick={() => setNewToken(null)}>
-                  Dismiss
-                </Button>
-              </div>
-            )}
+
 
             {/* Create form */}
             <form
@@ -321,6 +331,70 @@ curl -X POST \\
           </CardContent>
         </Card>
       </div>
+
+      {/* Token created modal with QR code */}
+      <Dialog open={tokenModalOpen} onOpenChange={(open) => { if (!open) handleCloseTokenModal(); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <QrCode className="w-5 h-5" />
+              Token created
+            </DialogTitle>
+            <DialogDescription>
+              Save this token now — it will not be shown again after you close this dialog.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Warning banner */}
+            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3">
+              <p className="text-sm font-medium text-destructive">
+                ⚠️ This token is shown only once. Copy it or scan the QR code before closing.
+              </p>
+            </div>
+
+            {/* Masked token with reveal */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">API Token</label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-xs bg-muted rounded px-2 py-1.5 font-mono break-all border">
+                  {tokenRevealed ? newToken : maskedToken}
+                </code>
+                <Button size="sm" variant="outline" onClick={() => setTokenRevealed(!tokenRevealed)} title={tokenRevealed ? 'Hide' : 'Reveal'}>
+                  {tokenRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </Button>
+                <Button size="sm" variant="outline" onClick={copyToken} title="Copy token">
+                  {copied ? <Check className="w-3.5 h-3.5 text-primary" /> : <Copy className="w-3.5 h-3.5" />}
+                </Button>
+              </div>
+            </div>
+
+            {/* QR code */}
+            <div className="flex flex-col items-center gap-3 py-2">
+              <div
+                className="bg-white p-3 rounded-lg [&_svg]:w-[180px] [&_svg]:h-[180px]"
+                dangerouslySetInnerHTML={{ __html: qrValue ? renderSVG(qrValue, { pixelSize: 4, border: 1 }) : '' }}
+              />
+              <p className="text-xs text-muted-foreground text-center max-w-xs break-all font-mono">
+                {fallbackText}
+              </p>
+            </div>
+
+            {/* How to connect */}
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
+              <h4 className="text-sm font-medium flex items-center gap-1.5">
+                <Smartphone className="w-3.5 h-3.5" />
+                How to connect iPhone app
+              </h4>
+              <ol className="text-xs text-muted-foreground space-y-0.5 list-decimal list-inside">
+                <li>Open the DayNote iPhone app</li>
+                <li>Tap <strong>Scan QR</strong> on the setup screen</li>
+                <li>Point your camera at the QR code above</li>
+              </ol>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Revoke confirmation dialog */}
       <AlertDialog open={!!revokeId} onOpenChange={(open) => !open && setRevokeId(null)}>
