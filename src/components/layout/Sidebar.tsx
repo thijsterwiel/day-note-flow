@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, CheckSquare, Calendar, Settings, StickyNote } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
 
 const navItems = [
   { to: '/', icon: Home, label: 'Dashboard' },
@@ -11,6 +12,7 @@ const navItems = [
 
 export function Sidebar() {
   const location = useLocation();
+  const { user } = useAuth();
 
   return (
     <aside className="hidden md:flex md:flex-col md:w-60 md:fixed md:inset-y-0 border-r border-sidebar-border bg-sidebar">
@@ -43,7 +45,7 @@ export function Sidebar() {
       </nav>
 
       <div className="px-4 py-4 border-t border-sidebar-border">
-        <p className="text-xs text-sidebar-foreground/50 truncate">demo@daynote.app</p>
+        <p className="text-xs text-sidebar-foreground/50 truncate">{user?.email ?? ''}</p>
       </div>
     </aside>
   );
