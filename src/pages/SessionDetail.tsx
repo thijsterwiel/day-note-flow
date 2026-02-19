@@ -91,6 +91,24 @@ export default function SessionDetail() {
     },
   });
 
+  const summarize = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('summarize-session', {
+        body: { session_id: id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['summary', id] });
+      toast({ title: 'Summary generated!' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Summarization failed', description: error.message, variant: 'destructive' });
+    },
+  });
+
   const summaryJson = summary?.raw_json as unknown as SummaryJSON | null;
 
   if (sessionLoading || chunksLoading) {
@@ -128,9 +146,17 @@ export default function SessionDetail() {
               {session.end_time && ` — ${format(new Date(session.end_time), 'h:mm a')}`}
             </p>
           </div>
-          <Button size="sm" disabled={chunks.length === 0}>
-            <Sparkles className="w-4 h-4 mr-1.5" />
-            Summarize
+          <Button
+            size="sm"
+            disabled={chunks.length === 0 || summarize.isPending}
+            onClick={() => summarize.mutate()}
+          >
+            {summarize.isPending ? (
+              <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4 mr-1.5" />
+            )}
+            {summarize.isPending ? 'Summarizing…' : 'Summarize'}
           </Button>
         </div>
 
