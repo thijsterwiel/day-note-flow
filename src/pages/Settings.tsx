@@ -4,9 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function Settings() {
   const { toast } = useToast();
+  const { user, signOut } = useAuth();
 
   const handleExport = () => {
     // TODO: wire to backend export
@@ -24,10 +26,10 @@ export default function Settings() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Account</CardTitle>
-            <CardDescription>demo@daynote.app</CardDescription>
+            <CardDescription>{user?.email}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={signOut}>
               <LogOut className="w-4 h-4 mr-1.5" />
               Sign out
             </Button>

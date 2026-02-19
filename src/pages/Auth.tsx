@@ -5,17 +5,50 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
+import { Navigate } from 'react-router-dom';
 
 export default function Auth() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+  const { session } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  if (session) return <Navigate to="/" replace />;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // TODO: wire to Lovable Cloud auth
-    navigate('/');
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        });
+        if (error) throw error;
+        toast({
+          title: 'Check your email',
+          description: 'We sent you a confirmation link to verify your account.',
+        });
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -54,10 +87,11 @@ export default function Auth() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                minLength={6}
               />
             </div>
-            <Button type="submit" className="w-full">
-              {isSignUp ? 'Sign up' : 'Sign in'}
+            <Button type="submit" className="w-full" disabled={loading}>
+              {loading ? 'Please wait...' : isSignUp ? 'Sign up' : 'Sign in'}
             </Button>
           </form>
           <p className="mt-4 text-center text-sm text-muted-foreground">
