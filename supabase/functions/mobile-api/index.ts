@@ -406,6 +406,189 @@ serve(async (req) => {
       return json({ chunk, deduplicated: false });
     }
 
+    // POST /sessions/:id/summarize — trigger AI summarization
+    params = matchRoute(method, pathname, "POST", "/sessions/:id/summarize");
+    if (params) {
+      const auth = await authenticateApiToken(req, supabaseAdmin);
+      if (auth instanceof Response) return auth;
+
+      if (!checkRateLimit(`summarize:${auth.userId}`, 10)) {
+        return json({ error: "Rate limit exceeded" }, 429);
+      }
+
+      const sessionId = params.id;
+
+      // Verify session belongs to user
+      const { data: session } = await supabaseAdmin
+        .from("sessions")
+        .select("id, title, start_time, end_time")
+        .eq("id", sessionId)
+        .eq("user_id", auth.userId)
+        .maybeSingle();
+
+      if (!session) return json({ error: "Session not found" }, 404);
+
+      // Fetch transcript chunks
+      const { data: chunks } = await supabaseAdmin
+        .from("transcript_chunks")
+        .select("*")
+        .eq("session_id", sessionId)
+        .order("created_at", { ascending: true });
+
+      if (!chunks || chunks.length === 0) {
+        return json({ error: "No transcript chunks found" }, 400);
+      }
+
+      const transcript = chunks.map((c: any) => `[${c.start_time}] ${c.text}`).join("\n\n");
+
+      const lovableApiKey = Deno.env.get("LOVABLE_API_KEY")!;
+
+      const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${lovableApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-3-flash-preview",
+          messages: [
+            { role: "system", content: "You are a meeting/conversation summarizer. Analyze the transcript and extract structured information. Respond ONLY by calling the provided tool." },
+            { role: "user", content: `Summarize this transcript from session "${session.title}":\n\n${transcript}` },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "create_summary",
+                description: "Create a structured summary of the transcript",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    summaryBullets: { type: "array", items: { type: "string" }, description: "3-7 key bullet points" },
+                    actionItems: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          task: { type: "string" },
+                          dueDate: { type: "string", description: "ISO date or null" },
+                          priority: { type: "string", enum: ["low", "med", "high"] },
+                          context: { type: "string" },
+                        },
+                        required: ["task", "priority"],
+                      },
+                    },
+                    agendaSuggestions: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          title: { type: "string" },
+                          datetime: { type: "string" },
+                          durationMinutes: { type: "number" },
+                          context: { type: "string" },
+                        },
+                        required: ["title"],
+                      },
+                    },
+                    reminders: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          text: { type: "string" },
+                          triggerDateTime: { type: "string" },
+                        },
+                        required: ["text"],
+                      },
+                    },
+                    importantFactsToRemember: { type: "array", items: { type: "string" } },
+                    openQuestions: { type: "array", items: { type: "string" } },
+                  },
+                  required: ["summaryBullets", "actionItems", "agendaSuggestions", "reminders", "importantFactsToRemember", "openQuestions"],
+                },
+              },
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "create_summary" } },
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const status = aiResponse.status;
+        if (status === 429) return json({ error: "AI rate limit exceeded. Try again shortly." }, 429);
+        if (status === 402) return json({ error: "AI credits exhausted." }, 402);
+        console.error("AI gateway error:", status, await aiResponse.text());
+        return json({ error: "AI processing failed" }, 500);
+      }
+
+      const aiData = await aiResponse.json();
+      const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+      if (!toolCall?.function?.arguments) {
+        console.error("No tool call in AI response:", JSON.stringify(aiData));
+        return json({ error: "AI returned unexpected format" }, 500);
+      }
+
+      const summaryJson = JSON.parse(toolCall.function.arguments);
+      const now = new Date().toISOString();
+
+      const { data: summaryRow, error: sumError } = await supabaseAdmin
+        .from("summaries")
+        .insert({
+          session_id: sessionId,
+          user_id: auth.userId,
+          scope: "session",
+          start_time: session.start_time,
+          end_time: session.end_time || now,
+          model: "google/gemini-3-flash-preview",
+          prompt_version: "v1",
+          raw_json: summaryJson,
+        })
+        .select()
+        .single();
+
+      if (sumError) {
+        console.error("Summary insert error:", sumError);
+        return json({ error: "Failed to save summary" }, 500);
+      }
+
+      const summaryId = summaryRow.id;
+      const inserts: Promise<any>[] = [];
+
+      if (summaryJson.actionItems?.length) {
+        inserts.push(supabaseAdmin.from("action_items").insert(
+          summaryJson.actionItems.map((i: any) => ({
+            summary_id: summaryId, task: i.task, priority: i.priority || "med",
+            due_date: i.dueDate || null, context: i.context || null,
+          }))
+        ));
+      }
+      if (summaryJson.agendaSuggestions?.length) {
+        inserts.push(supabaseAdmin.from("agenda_items").insert(
+          summaryJson.agendaSuggestions.map((i: any) => ({
+            summary_id: summaryId, title: i.title, datetime: i.datetime || null,
+            duration_minutes: i.durationMinutes || null, notes: i.context || null,
+          }))
+        ));
+      }
+      if (summaryJson.reminders?.length) {
+        inserts.push(supabaseAdmin.from("reminders").insert(
+          summaryJson.reminders.map((i: any) => ({
+            summary_id: summaryId, text: i.text, trigger_datetime: i.triggerDateTime || null,
+          }))
+        ));
+      }
+      if (summaryJson.importantFactsToRemember?.length) {
+        inserts.push(supabaseAdmin.from("important_facts").insert(
+          summaryJson.importantFactsToRemember.map((f: string) => ({ summary_id: summaryId, fact: f }))
+        ));
+      }
+
+      await Promise.all(inserts);
+
+      return json({ success: true, summary_id: summaryId, raw_json: summaryJson });
+    }
+
     return json({ error: "Not found" }, 404);
   } catch (e) {
     console.error("Mobile API error:", e);
