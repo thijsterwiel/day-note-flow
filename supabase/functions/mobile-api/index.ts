@@ -200,6 +200,62 @@ serve(async (req) => {
 
     // ===================== MOBILE SESSIONS (requires API token auth) =====================
 
+    // GET /sessions — list recent sessions with chunk counts
+    if (matchRoute(method, pathname, "GET", "/sessions")) {
+      const auth = await authenticateApiToken(req, supabaseAdmin);
+      if (auth instanceof Response) return auth;
+
+      const limit = Math.min(parseInt(url.searchParams.get("limit") || "20"), 100);
+      const offset = parseInt(url.searchParams.get("offset") || "0");
+
+      const { data: sessions, error } = await supabaseAdmin
+        .from("sessions")
+        .select("id, title, start_time, end_time, created_at")
+        .eq("user_id", auth.userId)
+        .order("start_time", { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (error) return json({ error: "Failed to fetch sessions" }, 500);
+
+      // Fetch chunk counts for each session
+      const sessionIds = (sessions || []).map((s: { id: string }) => s.id);
+      let chunkCounts: Record<string, number> = {};
+
+      if (sessionIds.length > 0) {
+        const { data: chunks } = await supabaseAdmin
+          .from("transcript_chunks")
+          .select("session_id")
+          .in("session_id", sessionIds);
+
+        if (chunks) {
+          for (const c of chunks) {
+            chunkCounts[c.session_id] = (chunkCounts[c.session_id] || 0) + 1;
+          }
+        }
+      }
+
+      const enriched = (sessions || []).map((s: { id: string; title: string; start_time: string; end_time: string | null; created_at: string }) => ({
+        ...s,
+        chunk_count: chunkCounts[s.id] || 0,
+        has_summary: false, // will enrich below
+      }));
+
+      // Check which sessions have summaries
+      if (sessionIds.length > 0) {
+        const { data: summaries } = await supabaseAdmin
+          .from("summaries")
+          .select("session_id")
+          .in("session_id", sessionIds);
+
+        const summarizedIds = new Set((summaries || []).map((s: { session_id: string }) => s.session_id));
+        for (const s of enriched) {
+          s.has_summary = summarizedIds.has(s.id);
+        }
+      }
+
+      return json({ sessions: enriched });
+    }
+
     // POST /sessions — create session
     if (matchRoute(method, pathname, "POST", "/sessions")) {
       const auth = await authenticateApiToken(req, supabaseAdmin);
