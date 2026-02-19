@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { format } from 'date-fns';
-import { ArrowLeft, Sparkles, Plus, Clock, CheckCircle2, Lightbulb, HelpCircle } from 'lucide-react';
+import { ArrowLeft, Sparkles, Plus, Clock, CheckCircle2, Lightbulb, HelpCircle, Loader2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { mockSessions, mockChunks, mockSummary } from '@/lib/mock-data';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+import type { SummaryJSON } from '@/lib/types';
 
 const priorityColors: Record<string, string> = {
   high: 'bg-priority-high/10 text-priority-high border-priority-high/20',
@@ -19,10 +22,86 @@ const priorityColors: Record<string, string> = {
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>();
   const [newChunk, setNewChunk] = useState('');
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const session = mockSessions.find((s) => s.id === id);
-  const chunks = id ? mockChunks[id] || [] : [];
-  const summary = mockSummary.session_id === id ? mockSummary : null;
+  const { data: session, isLoading: sessionLoading } = useQuery({
+    queryKey: ['session', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('sessions')
+        .select('*')
+        .eq('id', id!)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
+  const { data: chunks = [], isLoading: chunksLoading } = useQuery({
+    queryKey: ['chunks', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('transcript_chunks')
+        .select('*')
+        .eq('session_id', id!)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
+  const { data: summary } = useQuery({
+    queryKey: ['summary', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('summaries')
+        .select('*')
+        .eq('session_id', id!)
+        .eq('scope', 'session')
+        .order('created_at', { ascending: false })
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!id,
+  });
+
+  const addChunk = useMutation({
+    mutationFn: async (text: string) => {
+      const now = format(new Date(), 'HH:mm');
+      const { error } = await supabase.from('transcript_chunks').insert({
+        session_id: id!,
+        text,
+        start_time: now,
+        end_time: now,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['chunks', id] });
+      queryClient.invalidateQueries({ queryKey: ['chunk-counts'] });
+      setNewChunk('');
+      toast({ title: 'Chunk added' });
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const summaryJson = summary?.raw_json as unknown as SummaryJSON | null;
+
+  if (sessionLoading || chunksLoading) {
+    return (
+      <AppLayout>
+        <div className="flex justify-center py-20">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   if (!session) {
     return (
@@ -34,11 +113,6 @@ export default function SessionDetail() {
       </AppLayout>
     );
   }
-
-  const handleAddChunk = () => {
-    // TODO: wire to backend
-    setNewChunk('');
-  };
 
   return (
     <AppLayout>
@@ -63,24 +137,30 @@ export default function SessionDetail() {
         <Tabs defaultValue="transcript" className="space-y-4">
           <TabsList>
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
-            <TabsTrigger value="summary" disabled={!summary}>
-              Summary {summary && '✓'}
+            <TabsTrigger value="summary" disabled={!summaryJson}>
+              Summary {summaryJson && '✓'}
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="transcript" className="space-y-4">
-            <div className="space-y-2">
-              {chunks.map((chunk) => (
-                <div key={chunk.id} className="flex gap-3 group">
-                  <span className="text-mono text-xs text-muted-foreground pt-1.5 w-12 shrink-0 text-right">
-                    {chunk.start_time}
-                  </span>
-                  <div className="flex-1 bg-card rounded-lg px-4 py-3 border border-border text-sm leading-relaxed">
-                    {chunk.text}
+            {chunks.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                No transcript chunks yet. Paste one below to get started.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {chunks.map((chunk) => (
+                  <div key={chunk.id} className="flex gap-3 group">
+                    <span className="text-mono text-xs text-muted-foreground pt-1.5 w-12 shrink-0 text-right">
+                      {chunk.start_time}
+                    </span>
+                    <div className="flex-1 bg-card rounded-lg px-4 py-3 border border-border text-sm leading-relaxed">
+                      {chunk.text}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
 
             <Card>
               <CardContent className="pt-4 space-y-3">
@@ -90,8 +170,17 @@ export default function SessionDetail() {
                   onChange={(e) => setNewChunk(e.target.value)}
                   rows={3}
                 />
-                <Button size="sm" variant="outline" onClick={handleAddChunk} disabled={!newChunk.trim()}>
-                  <Plus className="w-4 h-4 mr-1.5" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => addChunk.mutate(newChunk)}
+                  disabled={!newChunk.trim() || addChunk.isPending}
+                >
+                  {addChunk.isPending ? (
+                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <Plus className="w-4 h-4 mr-1.5" />
+                  )}
                   Add Chunk
                 </Button>
               </CardContent>
@@ -99,7 +188,7 @@ export default function SessionDetail() {
           </TabsContent>
 
           <TabsContent value="summary" className="space-y-4">
-            {summary && (
+            {summaryJson && (
               <>
                 <Card>
                   <CardHeader>
@@ -110,7 +199,7 @@ export default function SessionDetail() {
                   </CardHeader>
                   <CardContent>
                     <ul className="space-y-2">
-                      {summary.raw_json.summaryBullets.map((b, i) => (
+                      {summaryJson.summaryBullets.map((b, i) => (
                         <li key={i} className="text-sm flex gap-2">
                           <span className="text-primary mt-1">•</span>
                           {b}
@@ -128,7 +217,7 @@ export default function SessionDetail() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {summary.raw_json.actionItems.map((item, i) => (
+                    {summaryJson.actionItems.map((item, i) => (
                       <div key={i} className="flex items-start gap-3 text-sm">
                         <div className="w-4 h-4 rounded border border-border mt-0.5 shrink-0" />
                         <div className="flex-1">
@@ -159,7 +248,7 @@ export default function SessionDetail() {
                   </CardHeader>
                   <CardContent>
                     <ul className="space-y-2">
-                      {summary.raw_json.importantFactsToRemember.map((f, i) => (
+                      {summaryJson.importantFactsToRemember.map((f, i) => (
                         <li key={i} className="text-sm flex gap-2">
                           <span className="text-primary mt-0.5">◆</span>
                           {f}
@@ -169,7 +258,7 @@ export default function SessionDetail() {
                   </CardContent>
                 </Card>
 
-                {summary.raw_json.openQuestions.length > 0 && (
+                {summaryJson.openQuestions.length > 0 && (
                   <Card>
                     <CardHeader>
                       <CardTitle className="text-base flex items-center gap-2">
@@ -179,7 +268,7 @@ export default function SessionDetail() {
                     </CardHeader>
                     <CardContent>
                       <ul className="space-y-2">
-                        {summary.raw_json.openQuestions.map((q, i) => (
+                        {summaryJson.openQuestions.map((q, i) => (
                           <li key={i} className="text-sm flex gap-2">
                             <span className="text-muted-foreground mt-0.5">?</span>
                             {q}
