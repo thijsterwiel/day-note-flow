@@ -216,6 +216,7 @@ export type Database = {
           created_at: string
           end_time: string | null
           id: string
+          language: string | null
           start_time: string
           title: string
           user_id: string
@@ -224,6 +225,7 @@ export type Database = {
           created_at?: string
           end_time?: string | null
           id?: string
+          language?: string | null
           start_time?: string
           title: string
           user_id: string
@@ -232,6 +234,7 @@ export type Database = {
           created_at?: string
           end_time?: string | null
           id?: string
+          language?: string | null
           start_time?: string
           title?: string
           user_id?: string
@@ -291,6 +294,7 @@ export type Database = {
           created_at: string
           end_time: string
           id: string
+          language: string | null
           session_id: string
           start_time: string
           text: string
@@ -300,6 +304,7 @@ export type Database = {
           created_at?: string
           end_time: string
           id?: string
+          language?: string | null
           session_id: string
           start_time: string
           text: string
@@ -309,6 +314,7 @@ export type Database = {
           created_at?: string
           end_time?: string
           id?: string
+          language?: string | null
           session_id?: string
           start_time?: string
           text?: string

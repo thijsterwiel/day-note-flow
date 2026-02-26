@@ -455,7 +455,7 @@ serve(async (req) => {
       // Verify session belongs to user
       const { data: session } = await supabaseAdmin
         .from("sessions")
-        .select("id, title, start_time, end_time")
+        .select("id, title, start_time, end_time, language")
         .eq("id", sessionId)
         .eq("user_id", auth.userId)
         .maybeSingle();
@@ -475,6 +475,18 @@ serve(async (req) => {
 
       const transcript = chunks.map((c: any) => `[${c.start_time}] ${c.text}`).join("\n\n");
 
+      // Detect language from session or chunks
+      const sessionLanguage = session.language || chunks[0]?.language || "en-US";
+      const isNederlands = sessionLanguage.startsWith("nl");
+
+      const systemPrompt = isNederlands
+        ? `Je bent een gespreks-samenvatter. Analyseer het transcript en haal gestructureerde informatie eruit. Antwoord ALLEEN door de beschikbare tool te gebruiken.`
+        : `You are a meeting/conversation summarizer. Analyze the transcript and extract structured information. Respond ONLY by calling the provided tool.`;
+
+      const userPrompt = isNederlands
+        ? `Vat dit transcript samen van sessie "${session.title}":\n\n${transcript}`
+        : `Summarize this transcript from session "${session.title}":\n\n${transcript}`;
+
       const lovableApiKey = Deno.env.get("LOVABLE_API_KEY")!;
 
       const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -486,8 +498,8 @@ serve(async (req) => {
         body: JSON.stringify({
           model: "google/gemini-3-flash-preview",
           messages: [
-            { role: "system", content: "You are a meeting/conversation summarizer. Analyze the transcript and extract structured information. Respond ONLY by calling the provided tool." },
-            { role: "user", content: `Summarize this transcript from session "${session.title}":\n\n${transcript}` },
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
           ],
           tools: [
             {
@@ -595,7 +607,7 @@ serve(async (req) => {
             summary_id: summaryId, task: i.task, priority: i.priority || "med",
             due_date: i.dueDate || null, context: i.context || null,
           }))
-        .select());
+        ).select());
       }
       if (summaryJson.agendaSuggestions?.length) {
         inserts.push(supabaseAdmin.from("agenda_items").insert(
@@ -603,19 +615,19 @@ serve(async (req) => {
             summary_id: summaryId, title: i.title, datetime: i.datetime || null,
             duration_minutes: i.durationMinutes || null, notes: i.context || null,
           }))
-        .select());
+        ).select());
       }
       if (summaryJson.reminders?.length) {
         inserts.push(supabaseAdmin.from("reminders").insert(
           summaryJson.reminders.map((i: any) => ({
             summary_id: summaryId, text: i.text, trigger_datetime: i.triggerDateTime || null,
           }))
-        .select());
+        ).select());
       }
       if (summaryJson.importantFactsToRemember?.length) {
         inserts.push(supabaseAdmin.from("important_facts").insert(
           summaryJson.importantFactsToRemember.map((f: string) => ({ summary_id: summaryId, fact: f }))
-        .select());
+        ).select());
       }
 
       await Promise.all(inserts);
