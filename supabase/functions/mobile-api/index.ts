@@ -379,6 +379,7 @@ serve(async (req) => {
         end_time: body.end_time,
         text: body.text,
         confidence: body.confidence ?? null,
+        language: body.language || "en-US",
       };
       if (body.chunkId) insertData.id = body.chunkId;
 
@@ -405,6 +406,38 @@ serve(async (req) => {
       });
 
       return json({ chunk, deduplicated: false });
+    }
+
+    // GET /sessions/:id/chunks — get transcript chunks
+    params = matchRoute(method, pathname, "GET", "/sessions/:id/chunks");
+    if (params) {
+      const auth = await authenticateApiToken(req, supabaseAdmin);
+      if (auth instanceof Response) return auth;
+
+      const sessionId = params.id;
+
+      // Verify session belongs to user
+      const { data: session } = await supabaseAdmin
+        .from("sessions")
+        .select("id")
+        .eq("id", sessionId)
+        .eq("user_id", auth.userId)
+        .maybeSingle();
+
+      if (!session) return json({ error: "Session not found" }, 404);
+
+      const { data: chunks, error } = await supabaseAdmin
+        .from("transcript_chunks")
+        .select("*")
+        .eq("session_id", sessionId)
+        .order("start_time", { ascending: true });
+
+      if (error) {
+        console.error("Chunks fetch error:", error);
+        return json({ error: "Failed to fetch chunks" }, 500);
+      }
+
+      return json({ chunks: chunks || [] });
     }
 
     // POST /sessions/:id/summarize — trigger AI summarization
