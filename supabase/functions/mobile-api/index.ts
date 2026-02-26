@@ -276,6 +276,7 @@ serve(async (req) => {
           user_id: auth.userId,
           title: body.title.trim(),
           start_time: body.start_time || new Date().toISOString(),
+          language: body.language || "en-US",
         })
         .select()
         .single();

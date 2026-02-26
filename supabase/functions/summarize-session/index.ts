@@ -83,9 +83,17 @@ serve(async (req) => {
 
     const transcript = chunks.map((c: any) => `[${c.start_time}] ${c.text}`).join("\n\n");
 
-    const systemPrompt = `You are a meeting/conversation summarizer. Analyze the transcript and extract structured information. Respond ONLY by calling the provided tool.`;
+    // Detect language (from session or chunks)
+    const sessionLanguage = session.language || chunks[0]?.language || "en-US";
+    const isNederlands = sessionLanguage.startsWith("nl");
 
-    const userPrompt = `Summarize this transcript from session "${session.title}":\n\n${transcript}`;
+    const systemPrompt = isNederlands
+      ? `Je bent een gespreks-samenvatter. Analyseer het transcript en haal gestructureerde informatie eruit. Antwoord ALLEEN door de beschikbare tool te gebruiken.`
+      : `You are a meeting/conversation summarizer. Analyze the transcript and extract structured information. Respond ONLY by calling the provided tool.`;
+
+    const userPrompt = isNederlands
+      ? `Vat dit transcript samen van sessie "${session.title}":\n\n${transcript}`
+      : `Summarize this transcript from session "${session.title}":\n\n${transcript}`;
 
     const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
