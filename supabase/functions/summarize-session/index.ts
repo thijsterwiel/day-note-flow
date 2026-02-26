@@ -265,7 +265,7 @@ serve(async (req) => {
             due_date: item.dueDate || null,
             context: item.context || null,
           }))
-        )
+        ).select()
       );
     }
 
@@ -279,7 +279,7 @@ serve(async (req) => {
             duration_minutes: item.durationMinutes || null,
             notes: item.context || null,
           }))
-        )
+        ).select()
       );
     }
 
@@ -291,7 +291,7 @@ serve(async (req) => {
             text: item.text,
             trigger_datetime: item.triggerDateTime || null,
           }))
-        )
+        ).select()
       );
     }
 
@@ -302,7 +302,7 @@ serve(async (req) => {
             summary_id: summaryId,
             fact,
           }))
-        )
+        ).select()
       );
     }
 

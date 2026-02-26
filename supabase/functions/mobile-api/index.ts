@@ -48,7 +48,7 @@ function generateToken(): string {
 // ---- Auth helpers ----
 async function authenticateApiToken(
   req: Request,
-  supabaseAdmin: ReturnType<typeof createClient>
+  supabaseAdmin: any
 ): Promise<{ userId: string; tokenId: string } | Response> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer dnk_")) {
@@ -81,7 +81,7 @@ async function authenticateSession(
   req: Request,
   supabaseUrl: string,
   anonKey: string
-): Promise<{ userId: string; supabaseUser: ReturnType<typeof createClient> } | Response> {
+): Promise<{ userId: string; supabaseUser: any } | Response> {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ey")) {
     return json({ error: "Missing authorization" }, 401);
@@ -595,7 +595,7 @@ serve(async (req) => {
             summary_id: summaryId, task: i.task, priority: i.priority || "med",
             due_date: i.dueDate || null, context: i.context || null,
           }))
-        ));
+        .select());
       }
       if (summaryJson.agendaSuggestions?.length) {
         inserts.push(supabaseAdmin.from("agenda_items").insert(
@@ -603,19 +603,19 @@ serve(async (req) => {
             summary_id: summaryId, title: i.title, datetime: i.datetime || null,
             duration_minutes: i.durationMinutes || null, notes: i.context || null,
           }))
-        ));
+        .select());
       }
       if (summaryJson.reminders?.length) {
         inserts.push(supabaseAdmin.from("reminders").insert(
           summaryJson.reminders.map((i: any) => ({
             summary_id: summaryId, text: i.text, trigger_datetime: i.triggerDateTime || null,
           }))
-        ));
+        .select());
       }
       if (summaryJson.importantFactsToRemember?.length) {
         inserts.push(supabaseAdmin.from("important_facts").insert(
           summaryJson.importantFactsToRemember.map((f: string) => ({ summary_id: summaryId, fact: f }))
-        ));
+        .select());
       }
 
       await Promise.all(inserts);
